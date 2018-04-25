@@ -79,7 +79,9 @@ class NetAPI
        void setConnectionPhrase(char * conPhr);
        
        /*! \brief returns the list of aknowledged clients */
-       vector<struct sockaddr_in *> getClientAddr();
+       const vector<struct sockaddr_in *>& getClientAddr() const;
+       
+       
        
        
        //----------- OTHERS -------------//

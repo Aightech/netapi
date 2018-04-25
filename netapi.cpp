@@ -364,7 +364,7 @@ void NetAPI::setConnectionPhrase(char * conPhr)
        strcpy(m_connectionPhrase,conPhr);
 }
 
-vector<struct sockaddr_in *> NetAPI::getClientAddr()
+const vector<struct sockaddr_in *>& NetAPI::getClientAddr() const
 {
        printf("General:Client Listing\n");
        for(int i=0; i<m_claddr.size()-1;i++)
