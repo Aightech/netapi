@@ -1,6 +1,9 @@
 #include "netapi.hpp"
 #include <iostream>
 #include <unistd.h>
+#include <ctime>
+
+
 
 int main()
 {
@@ -13,21 +16,24 @@ int main()
        
        
        char enter[50];
-       cin>>enter;
+       //cin>>enter;
        api.connectToServer(2000,(char *)"127.0.0.1");
-       usleep(0.5);
+       //waitSec(2);
+       cin>>enter;
        
        api.getClientAddr();
        
        api.sentToClient(0,(char*)"Mhey");
        api.sentToClient(0,(char*)"Mhoyy");
+       api.sentToClient(0,(char*)"Mhoazda");
+       cin>>enter;
        
        int n;
-       do{
-              n=api.getReceiverBuffer(enter);
-              cout << "buffer n°"<< n+1<< ": "<<enter<< endl;
-       }while( n > -1);
-       cout << "buffer n°"<< n+1<< ": "<<enter<< endl;
+       cout << "start" << endl;
+       while((n=api.getReceiverBuffer(enter))>-1)
+       {
+              cout << "buffer n°"<< n<< ": "<<enter<< endl;
+       }
        cin>>enter;
        api.endReceiver();
        //
