@@ -407,9 +407,9 @@ int NetAPI::receiverUDP()
 					m_bufferMtx[m_RxBufferIndex].lock();//lock the mutex of the new buffer
 					strcpy(m_RxBuffer[m_RxBufferIndex],tempBuf);
 					m_bufferMtx[m_RxBufferIndex].unlock();
-					processReceiverMessage(tempBuf);
+					processReceiverMessage(tempBuf,reply);
 					printf("Rx:Buffer[%d]: [%s]\n\n",m_RxBufferIndex, m_RxBuffer[m_RxBufferIndex]);
-					strcpy(reply,"rcvd");
+					
 				}break;
 				case 'C'://connection attempt :  C[portno]P[connectionPhrase]
 				{
@@ -579,9 +579,8 @@ int NetAPI::receiverTCP()
 					m_bufferMtx[m_RxBufferIndex].lock();//lock the mutex of the new buffer
 					strcpy(m_RxBuffer[m_RxBufferIndex],tempBuf);
 					m_bufferMtx[m_RxBufferIndex].unlock();
-					processReceiverMessage(tempBuf);
+					processReceiverMessage(tempBuf,reply);
 					printf("Rx:Buffer[%d]: [%s]\n\n",m_RxBufferIndex, m_RxBuffer[m_RxBufferIndex]);
-					strcpy(reply,"rcvd");
 				}break;
 				case 'C'://connection attempt :  C[portno]P[connectionPhrase]
 				{

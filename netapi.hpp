@@ -85,7 +85,7 @@ class NetAPI
 	int startReceiver(int port,char* protocol);
 
 	/*! \brief vitual methode to implement in extented object in order to have a direct access to the message received by the receiver. The message need to start with a 'M' */
-	virtual int processReceiverMessage(char * buffer){};
+	virtual int processReceiverMessage(char * buffer, char * reply){strcpy(reply,"rcvd");};
 
 	/*! \brief Store the last filled received buffer in the buffer passed in argument. and returns the number of unread buffer  */
 	int getReceiverBuffer(char *buffer);
