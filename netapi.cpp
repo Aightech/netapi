@@ -22,7 +22,8 @@ int waitSec(float sec)
 NetAPI::NetAPI()
 {
 
-
+	for(int i =0; i<NB_BUFFERS; i++)
+		m_RxBufferFilled[i]=false;
 	//by default the mode verbose in unset
 	m_verbose = false;    
 };
@@ -107,6 +108,13 @@ int NetAPI::sendUDP(int port, char * hostname, char * buf)
 
 int NetAPI::sendUDP(struct sockaddr_in * addr, char * buf)
 {
+	m_TxUDPfd = socket(AF_INET, SOCK_DGRAM, 0);
+	if (m_TxUDPfd < 0 && m_verbose) 
+	{
+		m_verboseMtx.lock();
+		printf("ERROR opening Tx socket\n");
+		m_verboseMtx.unlock();
+	}
 	/* send the message to the server */
 	m_Txlen = sizeof(*addr);
 	int n = sendto(m_TxUDPfd, buf, strlen(buf), MSG_DONTWAIT, (struct sockaddr *)addr, m_Txlen);
@@ -116,36 +124,50 @@ int NetAPI::sendUDP(struct sockaddr_in * addr, char * buf)
 	if(m_verbose)
 		printf("Tx:Sent [%s], to %s:%d\n", buf, inet_ntoa(addr->sin_addr), ntohs(addr->sin_port));
 	m_verboseMtx.unlock();
+	close(m_TxUDPfd);
 	return n;
 }
 
 int NetAPI::sendUDP(int port, char * hostname, char * buf, char recvBuff[])
 {
-	//use the basic sending methode
-	int n = this->sendUDP(port,hostname,buf);
-
-	usleep(0.1);
-	/* get the server's reply . WARNING: the function is blocking if the socket is set to be so */
-	int m = recvfrom(m_TxUDPfd, recvBuff, BUFSIZE, 0, (struct sockaddr*)&m_Txaddr, &m_Txlen);
-
-	if(m_verbose)
+	/* gethostbyname: get the server's DNS entry */
+	m_Txdest = gethostbyname(hostname);
+	if (m_Txdest == NULL && m_verbose)
 	{
 		m_verboseMtx.lock();
-		if (m < 0) 
-			printf("Tx:ERROR in recvfrom\n");
-		else
-			printf("Tx:data from server: [%s]\n", recvBuff);
+		printf("Tx:ERROR, no such host as %s\n", hostname);
 		m_verboseMtx.unlock();
+		return -1;
 	}
-	return m;
+	/* build the server's Internet address */
+	bzero((char *) &m_Txaddr, sizeof(m_Txaddr));
+	m_Txaddr.sin_family = AF_INET;
+	bcopy((char *)m_Txdest->h_addr, (char *)&m_Txaddr.sin_addr.s_addr, m_Txdest->h_length);
+	m_Txaddr.sin_port = htons(port);
+	//use the basic send methode
+	return this->sendUDP(&m_Txaddr,buf,recvBuff);
 }
 
 
 
 int NetAPI::sendUDP(struct sockaddr_in * addr, char * buf, char recvBuff[])
 {
-	//use the basic sending method
-	int n = this->sendUDP(addr,buf);
+	m_TxUDPfd = socket(AF_INET, SOCK_DGRAM, 0);
+	if (m_TxUDPfd < 0 && m_verbose) 
+	{
+		m_verboseMtx.lock();
+		printf("ERROR opening Tx socket\n");
+		m_verboseMtx.unlock();
+	}
+	/* send the message to the server */
+	m_Txlen = sizeof(*addr);
+	int n = sendto(m_TxUDPfd, buf, strlen(buf), MSG_DONTWAIT, (struct sockaddr *)addr, m_Txlen);
+	m_verboseMtx.lock();
+	if (n < 0 && m_verbose) 
+		printf("Tx:ERROR in sendto\n");
+	if(m_verbose)
+		printf("Tx:Sent [%s], to %s:%d\n", buf, inet_ntoa(addr->sin_addr), ntohs(addr->sin_port));
+	m_verboseMtx.unlock();
 	usleep(0.1);
 	/* get the server's reply */
 	int m = recvfrom(m_TxUDPfd, recvBuff, BUFSIZE, 0, (struct sockaddr*)addr, &m_Txlen);
@@ -158,6 +180,7 @@ int NetAPI::sendUDP(struct sockaddr_in * addr, char * buf, char recvBuff[])
 			printf("Tx:data from server: [%s]\n", recvBuff);
 		m_verboseMtx.unlock();
 	}
+	close(m_TxUDPfd);
 	return m;
 }
 
@@ -186,7 +209,7 @@ int NetAPI::sendTCP(struct sockaddr_in * addr, char * buf)
 {
 	/* send the message to the server */
 	m_TxTCPfd = socket(AF_INET, SOCK_STREAM, 0);
-	if (m_Rxfd < 0 && m_verbose) 
+	if (m_TxTCPfd < 0 && m_verbose) 
 	{
 		m_verboseMtx.lock();
 		printf("ERROR opening Tx socket\n");
@@ -372,17 +395,16 @@ int NetAPI::receiverUDP()
 		m_verboseMtx.unlock();
 	}
 
-	m_RxBufferIndex = -1;
 	m_clientIndex =0;
 	char tempBuf[BUFSIZE];
-
+	int currentBuffer;
 	while (m_ReceiverActive) 
 	{
-
-		if(m_RxBufferIndex < NB_BUFFERS)
+		currentBuffer=0;
+		while(m_RxBufferFilled[currentBuffer] && ++currentBuffer < NB_BUFFERS){}
+		if(currentBuffer < NB_BUFFERS)
 		{
-
-
+			m_bufferMtx[currentBuffer].lock();//lock the mutex of the new buffer
 			/*
 			* recvfrom: receive a UDP datagram from a client
 			*/
@@ -403,12 +425,173 @@ int NetAPI::receiverUDP()
 			{
 				case 'M'://message
 				{
-					m_RxBufferIndex++;
-					m_bufferMtx[m_RxBufferIndex].lock();//lock the mutex of the new buffer
-					strcpy(m_RxBuffer[m_RxBufferIndex],tempBuf);
-					m_bufferMtx[m_RxBufferIndex].unlock();
+					strcpy(m_RxBuffer[currentBuffer],tempBuf);
+					
 					processReceiverMessage(tempBuf,reply);
-					printf("Rx:Buffer[%d]: [%s]\n\n",m_RxBufferIndex, m_RxBuffer[m_RxBufferIndex]);
+					//printf("Rx:Buffer[%d]: [%s]\n\n",currentBuffer, m_RxBuffer[currentBuffer]);
+					m_RxBufferFilled[currentBuffer]=true;
+				}break;
+				case 'C'://connection attempt :  C[portno]P[connectionPhrase]
+				{
+					if(m_connectable)//if the connections are allowed
+					{
+						port = atoi(tempBuf+1);
+						if(m_connectionPhrase != NULL && strcmp(strchr(tempBuf,'P')+1,m_connectionPhrase)==0)
+						{
+							if(m_clientIndex<NB_MAX_CLIENT)
+							{
+								strcpy(reply,"accepted");
+
+								m_claddr.push_back(new struct sockaddr_in);
+								bzero((char *) m_claddr[m_clientIndex], sizeof(&m_claddr[m_clientIndex]));
+								m_claddr[m_clientIndex]->sin_family = AF_INET;
+								m_claddr[m_clientIndex]->sin_addr.s_addr = m_clientaddr.sin_addr.s_addr;
+								m_claddr[m_clientIndex]->sin_port = htons((unsigned short)port);
+
+
+
+								if(m_verbose) 
+								{
+									m_verboseMtx.lock();
+									printf("Rx:Client %s:%d accepted.\n", inet_ntoa(m_claddr[m_clientIndex]->sin_addr),port);
+									m_verboseMtx.unlock();
+								}
+								m_clientIndex++;
+
+
+							}
+							else
+							{
+								strcpy(reply,"full");
+							}
+
+						}
+						else
+						{
+							m_verboseMtx.lock();
+							if(m_connectionPhrase == NULL)
+								printf("Rx:Connection phrase need to be set.\n");
+							else
+								printf("Rx:Connection phrase incorect\n"); 
+							m_verboseMtx.unlock();
+						}
+					}
+					else if(m_verbose)
+					{
+						m_verboseMtx.lock();
+						printf("Rx:Api is not connectable. \n");
+						m_verboseMtx.unlock(); 
+					}
+
+				}break;
+				default:
+				{
+
+				}
+
+
+
+			}
+
+			m_bufferMtx[currentBuffer].unlock();
+
+		}
+	}
+	
+	if(m_verbose)
+	{
+		m_verboseMtx.lock();
+		printf("Rx:Receiver stoped listening port %d\n", m_Rxport);
+		m_verboseMtx.unlock();
+	}
+
+	return 0;
+
+}
+
+int NetAPI::receiverTCP()
+{
+	/* setsockopt: Handy debugging trick that lets 
+	* us rerun the server immediately after we kill it; 
+	* otherwise we have to wait about 20 secs. 
+	* Eliminates "ERROR on binding: Address already in use" error. 
+	*/
+	int optval = 1;/* flag value for setsockopt */
+	setsockopt(m_Rxfd, SOL_SOCKET, SO_REUSEADDR, (const void *)&optval , sizeof(int));
+
+	/*
+	* build the server's Internet address
+	*/
+	bzero((char *) &m_Rxaddr, sizeof(m_Rxaddr));
+	m_Rxaddr.sin_family = AF_INET;
+	m_Rxaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+	m_Rxaddr.sin_port = htons((unsigned short)m_Rxport);
+
+	/* 
+	* bind: associate the parent socket with a port 
+	*/
+	if(bind(m_Rxfd, (struct sockaddr *) &m_Rxaddr, sizeof(m_Rxaddr)) < 0 && m_verbose) 
+	{
+		m_verboseMtx.lock();
+		printf("Rx:ERROR on binding\n");
+		m_verboseMtx.unlock();
+	}
+
+	/* 
+	* main loop: wait for a datagram, then echo it
+	*/
+	m_cllen = sizeof(m_clientaddr);
+	listen(m_Rxfd,5);
+
+
+	m_ReceiverActive = true;
+	if(m_verbose)
+	{
+		m_verboseMtx.lock();
+		printf("Rx: Receiver TCP started listening on port %d:\n", m_Rxport);
+		m_verboseMtx.unlock();
+	}
+
+	
+	m_clientIndex =0;
+	char tempBuf[BUFSIZE];
+
+	int newsocket;
+	int currentBuffer;
+	while (m_ReceiverActive) 
+	{
+
+		currentBuffer=0;
+		while(m_RxBufferFilled[currentBuffer] && ++currentBuffer < NB_BUFFERS){}
+		if(currentBuffer < NB_BUFFERS)
+		{
+			m_bufferMtx[currentBuffer].lock();//lock the mutex of the new buffer
+			newsocket = accept(m_Rxfd,(struct sockaddr *)& m_clientaddr, &m_cllen);
+			/*
+			* recvfrom: receive a UDP datagram from a client
+			*/
+			bzero(tempBuf, BUFSIZE);
+			int n = read(newsocket, tempBuf, BUFSIZE);
+
+			m_verboseMtx.lock();
+			if (n < 0 && m_verbose)
+				printf("Rx:ERROR in recvfrom\n");
+			if(m_verbose)
+				printf("Rx:Received packet from %s:%d\nRx:Buffer temp: [%s]\n\n", inet_ntoa(m_clientaddr.sin_addr), ntohs(m_clientaddr.sin_port),tempBuf);
+			m_verboseMtx.unlock();
+
+			char reply[50]="nope";
+
+			int port;
+			switch(tempBuf[0])
+			{
+				case 'M'://message
+				{
+					
+					strcpy(m_RxBuffer[currentBuffer],tempBuf);
+					processReceiverMessage(tempBuf,reply);
+					printf("Rx:Buffer[%d]: [%s]\n\n",currentBuffer, m_RxBuffer[currentBuffer]);
+					m_RxBufferFilled[currentBuffer]=true;
 					
 				}break;
 				case 'C'://connection attempt :  C[portno]P[connectionPhrase]
@@ -472,178 +655,7 @@ int NetAPI::receiverUDP()
 
 
 			}
-
-
-			/*    
-			* sendto: echo the input back to the client 
-			*/
-			n = sendto(m_Rxfd, reply, sizeof(reply), 0, (struct sockaddr *) &m_clientaddr, m_cllen);
-			m_verboseMtx.lock();
-			if (n < 0 && m_verbose) 
-			printf("Rx:ERROR in sendto\n");
-			else if(m_verbose)
-			printf("Rx:Replied to %s: [%s]\n", inet_ntoa(m_clientaddr.sin_addr),reply);
-			m_verboseMtx.unlock();
-
-
-		}
-	}
-	
-	if(m_verbose)
-	{
-		m_verboseMtx.lock();
-		printf("Rx:Receiver stoped listening port %d\n", m_Rxport);
-		m_verboseMtx.unlock();
-	}
-
-	return 0;
-
-}
-
-int NetAPI::receiverTCP()
-{
-	/* setsockopt: Handy debugging trick that lets 
-	* us rerun the server immediately after we kill it; 
-	* otherwise we have to wait about 20 secs. 
-	* Eliminates "ERROR on binding: Address already in use" error. 
-	*/
-	int optval = 1;/* flag value for setsockopt */
-	setsockopt(m_Rxfd, SOL_SOCKET, SO_REUSEADDR, (const void *)&optval , sizeof(int));
-
-	/*
-	* build the server's Internet address
-	*/
-	bzero((char *) &m_Rxaddr, sizeof(m_Rxaddr));
-	m_Rxaddr.sin_family = AF_INET;
-	m_Rxaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-	m_Rxaddr.sin_port = htons((unsigned short)m_Rxport);
-
-	/* 
-	* bind: associate the parent socket with a port 
-	*/
-	if(bind(m_Rxfd, (struct sockaddr *) &m_Rxaddr, sizeof(m_Rxaddr)) < 0 && m_verbose) 
-	{
-		m_verboseMtx.lock();
-		printf("Rx:ERROR on binding\n");
-		m_verboseMtx.unlock();
-	}
-
-	/* 
-	* main loop: wait for a datagram, then echo it
-	*/
-	m_cllen = sizeof(m_clientaddr);
-	listen(m_Rxfd,5);
-
-
-	m_ReceiverActive = true;
-	if(m_verbose)
-	{
-		m_verboseMtx.lock();
-		printf("Rx: Receiver TCP started listening on port %d:\n", m_Rxport);
-		m_verboseMtx.unlock();
-	}
-
-	m_RxBufferIndex = -1;
-	m_clientIndex =0;
-	char tempBuf[BUFSIZE];
-
-	int newsocket;
-
-	while (m_ReceiverActive) 
-	{
-
-		if(m_RxBufferIndex < NB_BUFFERS)
-		{
-			newsocket = accept(m_Rxfd,(struct sockaddr *)& m_clientaddr, &m_cllen);
-			/*
-			* recvfrom: receive a UDP datagram from a client
-			*/
-			bzero(tempBuf, BUFSIZE);
-			int n = read(newsocket, tempBuf, BUFSIZE);
-
-			m_verboseMtx.lock();
-			if (n < 0 && m_verbose)
-				printf("Rx:ERROR in recvfrom\n");
-			if(m_verbose)
-				printf("Rx:Received packet from %s:%d\nRx:Buffer temp: [%s]\n\n", inet_ntoa(m_clientaddr.sin_addr), ntohs(m_clientaddr.sin_port),tempBuf);
-			m_verboseMtx.unlock();
-
-			char reply[50]="nope";
-
-			int port;
-			switch(tempBuf[0])
-			{
-				case 'M'://message
-				{
-					m_RxBufferIndex++;
-					m_bufferMtx[m_RxBufferIndex].lock();//lock the mutex of the new buffer
-					strcpy(m_RxBuffer[m_RxBufferIndex],tempBuf);
-					m_bufferMtx[m_RxBufferIndex].unlock();
-					processReceiverMessage(tempBuf,reply);
-					printf("Rx:Buffer[%d]: [%s]\n\n",m_RxBufferIndex, m_RxBuffer[m_RxBufferIndex]);
-				}break;
-				case 'C'://connection attempt :  C[portno]P[connectionPhrase]
-				{
-					if(m_connectable)//if the connections are allowed
-					{
-						port = atoi(tempBuf+1);
-						if(m_connectionPhrase != NULL && strcmp(strchr(tempBuf,'P')+1,m_connectionPhrase)==0)
-						{
-							if(m_clientIndex<NB_MAX_CLIENT)
-							{
-								strcpy(reply,"accepted");
-
-								m_claddr.push_back(new struct sockaddr_in);
-								bzero((char *) m_claddr[m_clientIndex], sizeof(&m_claddr[m_clientIndex]));
-								m_claddr[m_clientIndex]->sin_family = AF_INET;
-								m_claddr[m_clientIndex]->sin_addr.s_addr = m_clientaddr.sin_addr.s_addr;
-								m_claddr[m_clientIndex]->sin_port = htons((unsigned short)port);
-
-
-
-								if(m_verbose) 
-								{
-									m_verboseMtx.lock();
-									printf("Rx:Client %s:%d accepted.\n", inet_ntoa(m_claddr[m_clientIndex]->sin_addr),port);
-									m_verboseMtx.unlock();
-								}
-								m_clientIndex++;
-
-
-							}
-							else
-							{
-							strcpy(reply,"full");
-							}
-
-						}
-						else
-						{
-							m_verboseMtx.lock();
-							if(m_connectionPhrase == NULL)
-								printf("Rx:Connection phrase need to be set.\n");
-							else
-								printf("Rx:Connection phrase incorect\n"); 
-							m_verboseMtx.unlock();
-						}
-					}
-					else if(m_verbose)
-					{
-						m_verboseMtx.lock();
-						printf("Rx:Api is not connectable. \n");
-						m_verboseMtx.unlock(); 
-					}
-
-				}break;
-				default:
-				{
-
-				}
-
-
-
-			}
-
+			
 
 			/*    
 			* sendto: echo the input back to the client 
@@ -657,7 +669,9 @@ int NetAPI::receiverTCP()
 			m_verboseMtx.unlock();
 
 			close(newsocket);
+			m_bufferMtx[currentBuffer].unlock();//lock the mutex of the new buffer
 		}
+		
 	}
 	close(m_Rxfd);
 	if(m_verbose)
@@ -682,13 +696,16 @@ int NetAPI::endReceiver()
 
 int NetAPI::getReceiverBuffer(char *buffer)
 {
-	if(m_RxBufferIndex>-1)//if some buffer is unread
+	int currentBuffer = 0;
+	while(!m_RxBufferFilled[currentBuffer] && ++currentBuffer < NB_BUFFERS){}
+	if(currentBuffer < NB_BUFFERS)//if some buffer is unread
 	{
-		m_bufferMtx[m_RxBufferIndex].lock();//mutex to ensure the well being of the data
-		printf("Buffer [%d]: %s  \n",m_RxBufferIndex,m_RxBuffer[m_RxBufferIndex]);
-		strcpy(buffer,m_RxBuffer[m_RxBufferIndex]);//copy the buffer
-		m_bufferMtx[m_RxBufferIndex--].unlock();
-		return m_RxBufferIndex+1;
+		m_bufferMtx[currentBuffer].lock();//mutex to ensure the well being of the data
+		//printf("Buffer [%d]: %s  \n",currentBuffer,m_RxBuffer[currentBuffer]);
+		strcpy(buffer,m_RxBuffer[currentBuffer]);//copy the buffer
+		m_RxBufferFilled[currentBuffer]=false;
+		m_bufferMtx[currentBuffer].unlock();
+		return currentBuffer;
 	}
 	return -1;
 }
