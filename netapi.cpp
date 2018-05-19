@@ -85,201 +85,133 @@ int NetAPI::scan(int port,int IPmin ,int IPmax )
 	}*/
 }
 
-int NetAPI::sendUDP(int port, char * hostname, char * buf)
+struct sockaddr_in NetAPI::getAddr(int port, char * hostname)
 {
 	/* gethostbyname: get the server's DNS entry */
-	m_Txdest = gethostbyname(hostname);
-	if (m_Txdest == NULL && m_verbose)
+	struct sockaddr_in addr;
+	struct hostent * dest = gethostbyname(hostname);
+	if (dest == NULL && m_verbose)
 	{
 		m_verboseMtx.lock();
 		printf("Tx:ERROR, no such host as %s\n", hostname);
 		m_verboseMtx.unlock();
-		return -1;
 	}
 	/* build the server's Internet address */
-	bzero((char *) &m_Txaddr, sizeof(m_Txaddr));
-	m_Txaddr.sin_family = AF_INET;
-	bcopy((char *)m_Txdest->h_addr, (char *)&m_Txaddr.sin_addr.s_addr, m_Txdest->h_length);
-	m_Txaddr.sin_port = htons(port);
+	bzero((char *) &addr, sizeof(addr));
+	addr.sin_family = AF_INET;
+	bcopy((char *)dest->h_addr, (char *)&addr.sin_addr.s_addr, dest->h_length);
+	addr.sin_port = htons(port);
 	//use the basic send methode
-	return this->sendUDP(&m_Txaddr,buf);
+	return addr;
 }
 
-
-int NetAPI::sendUDP(struct sockaddr_in * addr, char * buf)
+void NetAPI::sendToClient(int index, char * buf, char *protocol)
 {
-	m_TxUDPfd = socket(AF_INET, SOCK_DGRAM, 0);
-	if (m_TxUDPfd < 0 && m_verbose) 
+	if(index == ALL_CLIENT)
+		for (int i = 0; i < m_claddr.size(); i ++)
+			send(m_claddr[i],buf,protocol);
+	else if(index < m_claddr.size())
+		send(m_claddr[index],buf,protocol);
+}
+
+void NetAPI::clearSendingThread()
+{
+	for (int i = 0; i < m_TxThread.size(); i ++)
+	{
+		m_TxThread.back()->join();
+		m_TxThread.pop_back();
+	}
+}
+
+int NetAPI::send(struct sockaddr_in * addr, char * buf, char *protocol, char * recvBuff)
+{	
+	//_send(addr, buf, protocol, recvBuff);
+	m_TxThread.push_back( new std::thread(&NetAPI::_send, this, addr,  buf, protocol, recvBuff) );
+	if(recvBuff != NULL)
+	{
+		m_TxThread.back()->join();
+		m_TxThread.pop_back();
+	}
+	printf("------- %d ------\n", m_TxThread.size());
+}
+
+int NetAPI::_send(struct sockaddr_in * addr, char * buf, char *protocol, char * recvBuff)
+{
+	//----CHECKING THE PROTOCOL---- Default is udp
+	bool udpP = false, tcpP = false;
+	
+	if(protocol==NULL || strcmp(protocol,"udp")==0 || strcmp(protocol,"UDP")==0 )
+		udpP = true;
+	else if ( strcmp(protocol,"tcp")==0 || strcmp(protocol,"TCP")==0)
+		tcpP = true;
+	else
+	{	m_verboseMtx.lock();	printf("ERROR protocol unknown\n");	m_verboseMtx.unlock();	return -1;}
+	//----GET A SOCKET----
+	int m_Txfd = 0;
+	if(udpP)
+		m_Txfd = socket(AF_INET, SOCK_DGRAM, 0);
+	else if(tcpP)
+		m_Txfd = socket(AF_INET, SOCK_STREAM, 0);
+	if (m_Txfd < 0 && m_verbose) {	m_verboseMtx.lock();	printf("ERROR opening Tx socket\n");	m_verboseMtx.unlock();	}
+	
+	
+	//----SEND THE MESSAGE ----
+	int n=0;
+	if(udpP)
+		n = sendto(m_Txfd, buf, strlen(buf), MSG_DONTWAIT, (struct sockaddr *)addr, sizeof(*addr));
+	else if (tcpP)
+	{
+		if (connect(m_Txfd,(struct sockaddr *) addr,sizeof(*addr)) < 0 && m_verbose) 
+		{m_verboseMtx.lock();	printf("Tx:ERROR couldn't connect\n");	m_verboseMtx.unlock();	return -1;}
+		
+		n = write(m_Txfd, buf, strlen(buf));
+	}
+	
+	//----DISPLAY WHAT HAS BEEN SENT
+	if (m_verbose) 
 	{
 		m_verboseMtx.lock();
-		printf("ERROR opening Tx socket\n");
-		m_verboseMtx.unlock();
-	}
-	/* send the message to the server */
-	m_Txlen = sizeof(*addr);
-	int n = sendto(m_TxUDPfd, buf, strlen(buf), MSG_DONTWAIT, (struct sockaddr *)addr, m_Txlen);
-	m_verboseMtx.lock();
-	if (n < 0 && m_verbose) 
-		printf("Tx:ERROR in sendto\n");
-	if(m_verbose)
 		printf("Tx:Sent [%s], to %s:%d\n", buf, inet_ntoa(addr->sin_addr), ntohs(addr->sin_port));
-	m_verboseMtx.unlock();
-	close(m_TxUDPfd);
-	return n;
-}
-
-int NetAPI::sendUDP(int port, char * hostname, char * buf, char recvBuff[])
-{
-	/* gethostbyname: get the server's DNS entry */
-	m_Txdest = gethostbyname(hostname);
-	if (m_Txdest == NULL && m_verbose)
-	{
-		m_verboseMtx.lock();
-		printf("Tx:ERROR, no such host as %s\n", hostname);
-		m_verboseMtx.unlock();
-		return -1;
-	}
-	/* build the server's Internet address */
-	bzero((char *) &m_Txaddr, sizeof(m_Txaddr));
-	m_Txaddr.sin_family = AF_INET;
-	bcopy((char *)m_Txdest->h_addr, (char *)&m_Txaddr.sin_addr.s_addr, m_Txdest->h_length);
-	m_Txaddr.sin_port = htons(port);
-	//use the basic send methode
-	return this->sendUDP(&m_Txaddr,buf,recvBuff);
-}
-
-
-
-int NetAPI::sendUDP(struct sockaddr_in * addr, char * buf, char recvBuff[])
-{
-	m_TxUDPfd = socket(AF_INET, SOCK_DGRAM, 0);
-	if (m_TxUDPfd < 0 && m_verbose) 
-	{
-		m_verboseMtx.lock();
-		printf("ERROR opening Tx socket\n");
-		m_verboseMtx.unlock();
-	}
-	/* send the message to the server */
-	m_Txlen = sizeof(*addr);
-	int n = sendto(m_TxUDPfd, buf, strlen(buf), MSG_DONTWAIT, (struct sockaddr *)addr, m_Txlen);
-	m_verboseMtx.lock();
-	if (n < 0 && m_verbose) 
-		printf("Tx:ERROR in sendto\n");
-	if(m_verbose)
-		printf("Tx:Sent [%s], to %s:%d\n", buf, inet_ntoa(addr->sin_addr), ntohs(addr->sin_port));
-	m_verboseMtx.unlock();
-	usleep(0.1);
-	/* get the server's reply */
-	int m = recvfrom(m_TxUDPfd, recvBuff, BUFSIZE, 0, (struct sockaddr*)addr, &m_Txlen);
-	if(m_verbose)
-	{
-		m_verboseMtx.lock();
-		if (m < 0) 
-			printf("Tx:ERROR in recvfrom\n");
-		else
-			printf("Tx:data from server: [%s]\n", recvBuff);
-		m_verboseMtx.unlock();
-	}
-	close(m_TxUDPfd);
-	return m;
-}
-
-int NetAPI::sendTCP(int port, char * hostname, char * buf)
-{
-	/* gethostbyname: get the server's DNS entry */
-	m_Txdest = gethostbyname(hostname);
-	if (m_Txdest == NULL && m_verbose)
-	{
-		m_verboseMtx.lock();
-		printf("Tx:ERROR, no such host as %s\n", hostname);
-		m_verboseMtx.unlock();
-		return -1;
-	}
-	/* build the server's Internet address */
-	bzero((char *) &m_Txaddr, sizeof(m_Txaddr));
-	m_Txaddr.sin_family = AF_INET;
-	bcopy((char *)m_Txdest->h_addr, (char *)&m_Txaddr.sin_addr.s_addr, m_Txdest->h_length);
-	m_Txaddr.sin_port = htons(port);
-	//use the basic send methode
-	return this->sendTCP(&m_Txaddr,buf);
-}
-
-
-int NetAPI::sendTCP(struct sockaddr_in * addr, char * buf)
-{
-	/* send the message to the server */
-	m_TxTCPfd = socket(AF_INET, SOCK_STREAM, 0);
-	if (m_TxTCPfd < 0 && m_verbose) 
-	{
-		m_verboseMtx.lock();
-		printf("ERROR opening Tx socket\n");
+		if(n < 0)
+			printf("Tx:ERROR in sendto\n");
 		m_verboseMtx.unlock();
 	}
 	
-	m_Txlen = sizeof(*addr);
-	if (connect(m_TxTCPfd,(struct sockaddr *) addr,m_Txlen) < 0 && m_verbose) 
-		printf("Tx:ERROR couldn't connect\n");
+	// FINISH HERE IF THERE NO RECEIVING BUFFER ----
+	if(recvBuff==NULL){	close(m_Txfd);	return n;	}
 	
-	int n = write(m_TxTCPfd, buf, strlen(buf));
-	m_verboseMtx.lock();
-	if (n < 0 && m_verbose) 
-		printf("Tx:ERROR in sendto\n");
-	if(m_verbose)
-		printf("Tx:Sent [%s], to %s:%d\n", buf, inet_ntoa(addr->sin_addr), ntohs(addr->sin_port));
-	m_verboseMtx.unlock();
-	return n;
-}
-
-int NetAPI::sendTCP(int port, char * hostname, char * buf, char recvBuff[])
-{
-	//use the basic sending methode
-	int n = this->sendTCP(port,hostname,buf);
-
-	usleep(0.1);
-	/* get the server's reply . WARNING: the function is blocking if the socket is set to be so */
-	int m = read(m_TxTCPfd, recvBuff, BUFSIZE);
-	close(m_TxTCPfd);
-	if(m_verbose)
+	waitSec(0.01);
+	
+	// ----GET THE REPLY ----//
+	int m;
+	if(udpP)
+		m = recvfrom(m_Txfd, recvBuff, BUFSIZE, 0, (struct sockaddr*)addr, &m_Txlen);
+	else if(tcpP)
+		m = read(m_Txfd, recvBuff, BUFSIZE);
+	
+	//---DISPLAY WHAT HAS BEEN RECEIVED
+	if (m_verbose) 
 	{
 		m_verboseMtx.lock();
-		if (m < 0) 
+		printf("Tx:data from server: [%s]\n", recvBuff);
+		if(n < 0)
 			printf("Tx:ERROR in recvfrom\n");
-		else
-			printf("Tx:data from server: [%s]\n", recvBuff);
 		m_verboseMtx.unlock();
 	}
+	close(m_Txfd);
 	return m;
-}
-
-
-
-int NetAPI::sendTCP(struct sockaddr_in * addr, char * buf, char recvBuff[])
-{
-	//use the basic sending method
-	int n = this->sendTCP(addr,buf);
-	usleep(0.1);
-	/* get the server's reply */
-	int m = read(m_TxTCPfd, recvBuff, BUFSIZE);
-	close(m_TxTCPfd);
-	if(m_verbose)
-	{
-		m_verboseMtx.lock();
-		if (m < 0) 
-			printf("Tx:ERROR in recvfrom\n");
-		else
-			printf("Tx:data from server: [%s]\n", recvBuff);
-		m_verboseMtx.unlock();
-	}
-	return m;
-}
+	
+};
 
 int NetAPI::connectToServer(int port, char * IP)
 {
 	char request[30];
 	sprintf(request,"C%dP%s",m_Rxport,m_connectionPhrase);
 	char reply[50];
-
-	int n = this->sendTCP(port,IP,(char *)request,reply);
+	
+	
+	struct sockaddr_in addr = getAddr(port,IP);
+	int n = this->send(&addr,(char *)request,(char*)"tcp",reply);
 
 	if(strcmp(reply,"accepted")==0)//if the server accepted the connection request by replying "accepted"
 	{
@@ -309,8 +241,6 @@ int NetAPI::connectToServer(int port, char * IP)
 	}
 
 }
-
-
 
 int NetAPI::startReceiver(int port, char * protocol)
 {
@@ -364,17 +294,13 @@ int NetAPI::receiverUDP()
 	int optval = 1;/* flag value for setsockopt */
 	setsockopt(m_Rxfd, SOL_SOCKET, SO_REUSEADDR, (const void *)&optval , sizeof(int));
 
-	/*
-	* build the server's Internet address
-	*/
+	//build the server's Internet address
 	bzero((char *) &m_Rxaddr, sizeof(m_Rxaddr));
 	m_Rxaddr.sin_family = AF_INET;
 	m_Rxaddr.sin_addr.s_addr = htonl(INADDR_ANY);
 	m_Rxaddr.sin_port = htons((unsigned short)m_Rxport);
 
-	/* 
-	* bind: associate the parent socket with a port 
-	*/
+	//bind: associate the parent socket with a port 
 	if(bind(m_Rxfd, (struct sockaddr *) &m_Rxaddr, sizeof(m_Rxaddr)) < 0 && m_verbose) 
 	{
 		m_verboseMtx.lock();
@@ -382,9 +308,7 @@ int NetAPI::receiverUDP()
 		m_verboseMtx.unlock();
 	}
 
-	/* 
-	* main loop: wait for a datagram, then echo it
-	*/
+	//main loop: wait for a datagram, then echo it
 	m_cllen = sizeof(&m_clientaddr);
 
 	m_ReceiverActive = true;
@@ -688,7 +612,8 @@ int NetAPI::receiverTCP()
 int NetAPI::endReceiver()
 {
 	m_ReceiverActive = false;//end the loop of the receiver
-	sendTCP(m_Rxport,(char *)"127.0.0.1",(char *)"halt");//send a stopping message to it 
+	struct sockaddr_in addr = getAddr(m_Rxport,(char *)"127.0.0.1");
+	this->send(&addr,(char *)"halt",(char*)"tcp");//send a stopping message to it 
 	if(m_ReceiverThread->joinable())//wait for it
 		m_ReceiverThread->join();
 	return 1;

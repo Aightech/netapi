@@ -16,16 +16,15 @@ int main()
 
 
 	char enter[50];
-	//cin>>enter;
 	api.connectToServer(2000,(char *)"127.0.0.1");
-	//waitSec(2);
-	cin>>enter;
+	
 
 	api.getClientAddr();
 
-	api.sentToClientTCP(0,(char*)"Mhey");
-	api.sentToClientTCP(0,(char*)"Mhoyy");
-	api.sentToClientTCP(0,(char*)"Mhoazda");
+	api.sendToClient(0,(char*)"Mhey",(char*)"tcp");
+	api.sendToClient(0,(char*)"Mhoyy",(char*)"tcp");
+	api.sendToClient(0,(char*)"Mhoazda",(char*)"tcp");
+	api.clearSendingThread();
 	cin>>enter;
 
 	int n;
