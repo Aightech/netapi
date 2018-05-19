@@ -132,7 +132,7 @@ int NetAPI::send(struct sockaddr_in * addr, char * buf, char *protocol, char * r
 		m_TxThread.back()->join();
 		m_TxThread.pop_back();
 	}
-	printf("------- %d ------\n", m_TxThread.size());
+	//printf("------- %d ------\n", m_TxThread.size());
 }
 
 int NetAPI::_send(struct sockaddr_in * addr, char * buf, char *protocol, char * recvBuff)
