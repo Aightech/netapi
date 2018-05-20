@@ -294,7 +294,7 @@ int NetAPI::startReceiver(int port, char * protocol)
 	}
 
 	waitSec(0.1);
-	waitSec(2,true);
+	waitSec(0.5,true);
 
 
 }
