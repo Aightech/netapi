@@ -11,10 +11,24 @@
 
 #include <fcntl.h>
 
-int waitSec(float sec)
+int waitSec(float sec,bool verbose)
 {
 	clock_t start=clock();
-	while(clock()-start < sec*CLOCKS_PER_SEC){}
+	char buff[] = "[  Waiting ... ]";
+	if(verbose)
+	{
+		printf("Info : %.3lfs %s\xd",((double)(clock()-start))/CLOCKS_PER_SEC,buff);
+		fflush(stdout);
+	}
+	while(clock()-start < sec*CLOCKS_PER_SEC)
+	{
+		if(verbose)
+		{
+			buff[1+(int)(14*(clock()-start)/(sec*CLOCKS_PER_SEC))] = '#';
+			printf("Info : %.3lfs %s\xd",((double)(clock()-start))/CLOCKS_PER_SEC,buff);
+			fflush(stdout);
+		}
+	}
 }
 
 
@@ -279,7 +293,8 @@ int NetAPI::startReceiver(int port, char * protocol)
 		}
 	}
 
-	waitSec(1.5);
+	waitSec(0.1);
+	waitSec(2,true);
 
 
 }

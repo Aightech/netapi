@@ -21,6 +21,7 @@
 
 using namespace std;
 
+int waitSec(float sec,bool verbose = false);
 
 class NetAPI
 {

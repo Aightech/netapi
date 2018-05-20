@@ -14,7 +14,7 @@ int main()
 
 	api.startReceiver(2000,(char*)"TCP");
 
-
+	//waitSec(2,true);
 	char enter[50];
 	api.connectToServer(2000,(char *)"127.0.0.1");
 	
