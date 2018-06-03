@@ -139,14 +139,14 @@ void NetAPI::clearSendingThread()
 
 int NetAPI::send(struct sockaddr_in * addr, char * buf, char *protocol, char * recvBuff)
 {	
-	//_send(addr, buf, protocol, recvBuff);
-	m_TxThread.push_back( new std::thread(&NetAPI::_send, this, addr,  buf, protocol, recvBuff) );
-	if(recvBuff != NULL)
-	{
-		m_TxThread.back()->join();
-		m_TxThread.pop_back();
-	}
-	//printf("------- %d ------\n", m_TxThread.size());
+	_send(addr, buf, protocol, recvBuff);
+//	m_TxThread.push_back( new std::thread(&NetAPI::_send, this, addr,  buf, protocol, recvBuff) );
+//	if(recvBuff != NULL)
+//	{
+//		m_TxThread.back()->join();
+//		m_TxThread.pop_back();
+//	}
+//	//printf("------- %d ------\n", m_TxThread.size());
 }
 
 int NetAPI::_send(struct sockaddr_in * addr, char * buf, char *protocol, char * recvBuff)
