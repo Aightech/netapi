@@ -226,8 +226,9 @@ int NetAPI::connectToServer(int port, char * IP)
 	
 	struct sockaddr_in addr = getAddr(port,IP);
 	int n = this->send(&addr,(char *)request,(char*)"tcp",reply);
-
-	if(strcmp(reply,"accepted")==0)//if the server accepted the connection request by replying "accepted"
+	int info=-1;
+	char *ptr;
+	if( (info=((ptr=strchr(reply,'I'))!=NULL)?atoi(ptr+1):-1) >= 0)//if the server accepted the connection request by replying with an Info >-1
 	{
 		/* build the server's Internet address */
 		m_Txdest = gethostbyname(IP);
@@ -241,7 +242,7 @@ int NetAPI::connectToServer(int port, char * IP)
 			printf("General:Connection success to %s:%d\n", inet_ntoa(m_Serveraddr.sin_addr), ntohs(m_Serveraddr.sin_port));
 			m_verboseMtx.unlock();
 		}
-		return 1;
+		return info;
 	}
 	else
 	{
@@ -251,7 +252,7 @@ int NetAPI::connectToServer(int port, char * IP)
 			printf("General:Connection fail to %s:%d\n", IP, port);
 			m_verboseMtx.unlock();
 		}
-		return 0;
+		return info;
 	}
 
 }
@@ -379,7 +380,7 @@ int NetAPI::receiverUDP()
 						{
 							if(m_clientIndex<NB_MAX_CLIENT)
 							{
-								strcpy(reply,"accepted");
+								sprintf(reply,"accepted I%d",m_clientIndex);
 
 								m_claddr.push_back(new struct sockaddr_in);
 								bzero((char *) m_claddr[m_clientIndex], sizeof(&m_claddr[m_clientIndex]));
