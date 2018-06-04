@@ -228,6 +228,9 @@ int NetAPI::connectToServer(int port, char * IP)
 	int n = this->send(&addr,(char *)request,(char*)"tcp",reply);
 	int info=-1;
 	char *ptr;
+	m_verboseMtx.lock();
+	printf("General: %s\n",reply);
+	m_verboseMtx.unlock();
 	if( (info=((ptr=strchr(reply,'I'))!=NULL)?atoi(ptr+1):-1) >= 0)//if the server accepted the connection request by replying with an Info >-1
 	{
 		/* build the server's Internet address */
@@ -543,7 +546,7 @@ int NetAPI::receiverTCP()
 						{
 							if(m_clientIndex<NB_MAX_CLIENT)
 							{
-								strcpy(reply,"accepted");
+								sprintf(reply,"accepted I%d",m_clientIndex);
 
 								m_claddr.push_back(new struct sockaddr_in);
 								bzero((char *) m_claddr[m_clientIndex], sizeof(&m_claddr[m_clientIndex]));
