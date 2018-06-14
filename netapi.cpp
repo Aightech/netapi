@@ -60,9 +60,9 @@ NetAPI::NetAPI()
 	m_verbose = false;    
 };
 
-int NetAPI::scan(int port,int IPmin ,int IPmax )
+int NetAPI::scan(int port,char servers[5][16],int IPmin ,int IPmax)
 {
-	char servers[5][64];
+	//char servers[5][64];
 	// --- Find the default IP interface --- //
        FILE *f;
        char line[100] , *iface , *c;
@@ -186,6 +186,7 @@ int NetAPI::scan(int port,int IPmin ,int IPmax )
        
        //Buffer B;
        //strcpy(B.Tx,"G0");
+       
        for(i=0;i<h;i++)
        {
               printf("- Somebody on: %s : ",serv_IPaddr[i]);
@@ -194,8 +195,13 @@ int NetAPI::scan(int port,int IPmin ,int IPmax )
 		
 		struct sockaddr_in addr = getAddr(port,serv_IPaddr[i]);
 		int n = this->send(&addr,(char *)request,(char*)"tcp",reply);
-
+		//printf("reply : %s\n",reply);
 		if(strcmp(reply,"server")==0)//if the server accepted the connection request by replying "accepted"
+		{
+			printf("server\n");
+			strcpy(servers[s],serv_IPaddr[i]);
+			s++;
+		}
 //              B.T_flag=1;
 //              sendTCP(serv_IPaddr[i],testingPort,&B);
 //              if(atoi(strchr(B.Rx,'G')+1)==0)
@@ -206,7 +212,7 @@ int NetAPI::scan(int port,int IPmin ,int IPmax )
 //                     servers[s++].portNo=testingPort;
 //              }
 //              else
-                     printf("server\n");
+                     
               
        }
 return s;

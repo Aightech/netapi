@@ -43,7 +43,7 @@ class NetAPI
 	};
 
 	/*! \brief Scans the network by attempting to connect to servers whose IP addresses ranged from IPmin to IPmax on port port */
-	int scan(int port,int IPmin =0,int IPmax=255 );
+	int scan(int port,char servers[5][16],int IPmin =0,int IPmax=255);
 
 	//------ SENDING METHODES ---------// 
 	int send(struct sockaddr_in * addr, char * buf, char *protocol=NULL, char * recvBuff=NULL);
