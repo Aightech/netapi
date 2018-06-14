@@ -9,7 +9,25 @@
 #include <netinet/in.h>
 #include <netdb.h> 
 
+#include <net/if.h>
+#include <err.h>
+#include <errno.h>
+
+#include <sys/types.h> 
+#include <sys/socket.h>
+#include <netinet/in.h>
+
+#include <netdb.h>
+#include <arpa/inet.h>
+
+#include <sys/ioctl.h>
+
+
+#include <net/if.h>
+#include <sys/wait.h>
+
 #include <fcntl.h>
+
 
 int waitSec(float sec,bool verbose)
 {
@@ -44,59 +62,154 @@ NetAPI::NetAPI()
 
 int NetAPI::scan(int port,int IPmin ,int IPmax )
 {
-	//TODO
-		// Set the socket as non-blocking 
-	/*long arg = fcntl(m_Txfd, F_GETFL, NULL); 
-	arg |= O_NONBLOCK; 
-	fcntl(m_TxTCPfd, F_SETFL, arg);*/
-	//set back to non bocking socket
-	/*arg = fcntl(m_Txfd, F_GETFL, NULL); 
-	arg &= (~O_NONBLOCK); 
-	fcntl(m_Txfd, F_SETFL, arg);*/
+	char servers[5][64];
+	// --- Find the default IP interface --- //
+       FILE *f;
+       char line[100] , *iface , *c;
+       f = fopen("/proc/net/route" , "r");
+       while(fgets(line , 100 , f))
+       {
+              iface = strtok(line , " \t");
+              c = strtok(NULL , " \t");
+              if(iface!=NULL && c!=NULL && strcmp(c , "00000000") == 0)
+                     break;
+       } 
+       fclose(f);
+       // ------------------------------------- //
+       
+       
+       // --- Find the IP address of the default interface --- //
+       int fd;
+       struct ifreq ifr;
 
-		/*if ((n = this->sendTCP(port,IP,(char *)request,reply)) < 0)
-	{ 
-		//the socket is not blocking so it doesn't have the time to read the reply of the buffer
-		if (errno == EWOULDBLOCK)
-		{
-			m_verboseMtx.lock();
-			printf("General:Connection in progress... : \t");
-			int valopt; 
-			long arg; 
-			fd_set myset; 
-			struct timeval tv; 
-			socklen_t lon;
+       fd = socket(AF_INET, SOCK_DGRAM, 0);
+       ifr.ifr_addr.sa_family = AF_INET;           //Type of address to retrieve - IPv4 IP address
+       strncpy(ifr.ifr_name , iface , IFNAMSIZ-1); //Copy the interface name in the ifreq structure
+       ioctl(fd, SIOCGIFADDR, &ifr);               //Get the ip address
+       close(fd);
+       char addressIP[16];
+       strcpy(addressIP,inet_ntoa(( (struct sockaddr_in *)&ifr.ifr_addr)->sin_addr) );
+       // --------------------------------------------------- //
+       
+       //display result
+       printf("Default interface is : %s \n" , iface);
+       printf("IP address : %s\n" , addressIP );
+       
+       // --- Get The pc ID --- //
+        //look for the last point of the ip address
+       int i=0,pt=0;
+       while(i<16&&pt<3)
+              if(addressIP[i++]=='.')
+                     pt++;
+                     
+       int pc = atoi(addressIP+i); //get the host id of the computer  
+       addressIP[i]='\0';
+       // ------------------------ //
+       
+       
+       char addr[16];
+       int sfd;
+       int sockfd, portno;
+       struct sockaddr_in serv_addr;
+       int res, valopt; 
+       long arg; 
+       fd_set myset; 
+       struct timeval tv; 
+       socklen_t lon;
+       
+       char serv_IPaddr[255][16];
+       int h=0,s=0;
+       int testingPort=port;
+       
+       
+       printf("scanning...\n[");
+       fflush(stdout);
+       for(int i=IPmin;i<IPmax;i++)
+       {
+              
+              if(i%5==0)
+              {
+                     printf("#");
+                     fflush(stdout);
+              }
+              sprintf(addr,"%s%d" ,addressIP,i);
+              //printf("%s\n",addr);
+              
+              sfd = socket(AF_INET, SOCK_STREAM, 0);
+              
+              if (sfd < 0) printf("ERROR opening socket");
+              
+              // Set non-blocking 
+              arg = fcntl(sfd, F_GETFL, NULL); 
+              arg |= O_NONBLOCK; 
+              fcntl(sfd, F_SETFL, arg);
+              
+              serv_addr.sin_family = AF_INET;
+              serv_addr.sin_addr.s_addr=inet_addr(addr);
+              serv_addr.sin_port = htons(testingPort);
+              if (connect(sfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0)
+              { 
+                     if (errno == EINPROGRESS) 
+                     {
+		              //printf("connect EINPROGRESS OK (expected)   ");
+		              tv.tv_sec = 0; 
+                            tv.tv_usec = 10000; 
+                            FD_ZERO(&myset); 
+                            FD_SET(sfd, &myset); 
+                            if (select(sfd+1, NULL, &myset, NULL, &tv) > 0) 
+                            { 
+                                   lon = sizeof(int); 
+                                   getsockopt(sfd, SOL_SOCKET, SO_ERROR, (void*)(&valopt), &lon); 
+                                   if(valopt==0)
+                                   { 
+                                          if(h<255)
+                                                 strcpy(serv_IPaddr[h++],addr);
+                                   }
+                                   
+                            }  
+                     }
+			
+              }
+              else
+                     printf("somebody on %s\n\n" , addr);
+                     
+              arg = fcntl(sfd, F_GETFL, NULL); 
+              arg &= (~O_NONBLOCK); 
+              fcntl(sfd, F_SETFL, arg);       
+                     
+              close(sfd);
+       }
+       printf("]\n");
+       char request[30];
+	sprintf(request,"C%dP%s",m_Rxport,"test");
+	char reply[50];
+       
+       //Buffer B;
+       //strcpy(B.Tx,"G0");
+       for(i=0;i<h;i++)
+       {
+              printf("- Somebody on: %s : ",serv_IPaddr[i]);
+              
+		
+		
+		struct sockaddr_in addr = getAddr(port,serv_IPaddr[i]);
+		int n = this->send(&addr,(char *)request,(char*)"tcp",reply);
 
-			tv.tv_sec = 0; 
-			tv.tv_usec = 10000; 
-			FD_ZERO(&myset); 
-			FD_SET(m_Txfd, &myset); 
-			if (select(m_Txfd+1, NULL, &myset, NULL, &tv) > 0) //if the timeout is respected
-			{
-				lon = sizeof(int); 
-				getsockopt(m_Txfd, SOL_SOCKET, SO_ERROR, (void*)(&valopt), &lon); 
-				if(valopt==0)//if the server exists
-				{
-					printf("Connection established\n");
-
-					//set back to blocking socket
-					arg = fcntl(m_Txfd, F_GETFL, NULL); 
-					arg &= (~O_NONBLOCK); 
-					fcntl(m_Txfd, F_SETFL, arg);
-
-					read(m_Txfd, reply, BUFSIZE);
-
-				}
-				else//if the connection failed
-					printf("Connection failed.\n");
-
-			}
-			else
-				printf("Timeout reached.\n"); 
-			m_verboseMtx.unlock();
-		}
-
-	}*/
+		if(strcmp(reply,"server")==0)//if the server accepted the connection request by replying "accepted"
+//              B.T_flag=1;
+//              sendTCP(serv_IPaddr[i],testingPort,&B);
+//              if(atoi(strchr(B.Rx,'G')+1)==0)
+//              {
+//                     printf("\tsh13 server\n");
+//                     strcpy(servers[s].IPaddress,serv_IPaddr[i]);
+//                     strcpy(servers[s].name, strtok((strchr(B.Rx,'N')+1),";"));
+//                     servers[s++].portNo=testingPort;
+//              }
+//              else
+                     printf("server\n");
+              
+       }
+return s;
 }
 
 struct sockaddr_in NetAPI::getAddr(int port, char * hostname)
@@ -139,14 +252,14 @@ void NetAPI::clearSendingThread()
 
 int NetAPI::send(struct sockaddr_in * addr, char * buf, char *protocol, char * recvBuff)
 {	
-	_send(addr, buf, protocol, recvBuff);
-//	m_TxThread.push_back( new std::thread(&NetAPI::_send, this, addr,  buf, protocol, recvBuff) );
-//	if(recvBuff != NULL)
-//	{
-//		m_TxThread.back()->join();
-//		m_TxThread.pop_back();
-//	}
-//	//printf("------- %d ------\n", m_TxThread.size());
+	return _send(addr, buf, protocol, recvBuff);
+	/*m_TxThread.push_back( new std::thread(&NetAPI::_send, this, addr,  buf, protocol, recvBuff) );
+	if(recvBuff != NULL)
+	{
+		m_TxThread.back()->join();
+		m_TxThread.pop_back();
+	}*/
+	//printf("------- %d ------\n", m_TxThread.size());
 }
 
 int NetAPI::_send(struct sockaddr_in * addr, char * buf, char *protocol, char * recvBuff)
@@ -226,12 +339,8 @@ int NetAPI::connectToServer(int port, char * IP)
 	
 	struct sockaddr_in addr = getAddr(port,IP);
 	int n = this->send(&addr,(char *)request,(char*)"tcp",reply);
-	int info=-1;
-	char *ptr;
-	m_verboseMtx.lock();
-	printf("General: %s\n",reply);
-	m_verboseMtx.unlock();
-	if( (info=((ptr=strchr(reply,'I'))!=NULL)?atoi(ptr+1):-1) >= 0)//if the server accepted the connection request by replying with an Info >-1
+
+	if(strcmp(reply,"accepted")==0)//if the server accepted the connection request by replying "accepted"
 	{
 		/* build the server's Internet address */
 		m_Txdest = gethostbyname(IP);
@@ -245,7 +354,7 @@ int NetAPI::connectToServer(int port, char * IP)
 			printf("General:Connection success to %s:%d\n", inet_ntoa(m_Serveraddr.sin_addr), ntohs(m_Serveraddr.sin_port));
 			m_verboseMtx.unlock();
 		}
-		return info;
+		return 1;
 	}
 	else
 	{
@@ -255,7 +364,7 @@ int NetAPI::connectToServer(int port, char * IP)
 			printf("General:Connection fail to %s:%d\n", IP, port);
 			m_verboseMtx.unlock();
 		}
-		return info;
+		return 0;
 	}
 
 }
@@ -383,7 +492,7 @@ int NetAPI::receiverUDP()
 						{
 							if(m_clientIndex<NB_MAX_CLIENT)
 							{
-								sprintf(reply,"accepted I%d",m_clientIndex);
+								strcpy(reply,"accepted");
 
 								m_claddr.push_back(new struct sockaddr_in);
 								bzero((char *) m_claddr[m_clientIndex], sizeof(&m_claddr[m_clientIndex]));
@@ -546,7 +655,7 @@ int NetAPI::receiverTCP()
 						{
 							if(m_clientIndex<NB_MAX_CLIENT)
 							{
-								sprintf(reply,"accepted I%d",m_clientIndex);
+								strcpy(reply,"accepted");
 
 								m_claddr.push_back(new struct sockaddr_in);
 								bzero((char *) m_claddr[m_clientIndex], sizeof(&m_claddr[m_clientIndex]));
@@ -580,6 +689,7 @@ int NetAPI::receiverTCP()
 							else
 								printf("Rx:Connection phrase incorect\n"); 
 							m_verboseMtx.unlock();
+							strcpy(reply,"server");
 						}
 					}
 					else if(m_verbose)

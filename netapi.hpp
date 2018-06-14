@@ -19,6 +19,8 @@
 #define NB_MAX_CLIENT 4
 #define ALL_CLIENT -1
 
+#define SERVERPORT 2000
+
 using namespace std;
 
 int waitSec(float sec,bool verbose = false);
